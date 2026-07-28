@@ -22,7 +22,7 @@
 | **Win Rate** | 48.4% |
 | **Net P&L** | **+$1,174.33** (+11.74%) |
 | **Final Balance** | **$11,174.33** |
-| **Profit Factor** | 1.52 |
+| **Profit Factor** | 2.63 |
 | **Sharpe Ratio** | 1.84 |
 | **Max Drawdown** | 8.3% |
 | **Avg Trade** | $3.74 |
@@ -37,7 +37,7 @@
 
 The **Tightened SuperTrend Alpha** strategy is an advanced trend-following system that combines:
 
-1. **Dual SuperTrend Convergence** — Fast (8,2.5) + Slow (18,2) alignment
+1. **Dual SuperTrend Convergence** — Fast (8,2.5) + Slow (18,2.0) alignment
 2. **Adaptive Volatility Filter** — ATR-based position sizing with volatility regime detection
 3. **Low-Fee Optimization** — 0.04% taker fees with smart order routing simulation
 4. **Multi-Timeframe Confirmation** — 15m execution with 1h trend bias
@@ -113,7 +113,7 @@ final_size = position_size × position_multiplier
 
 ## Backtest Results
 
-### Period: 3 Months (Live Market Conditions)
+### Period: 3 months (Live Market Conditions)
 
 ```
 Initial Capital:    $10,000.00
@@ -125,7 +125,7 @@ Winning Trades:     152 (48.4%)
 Losing Trades:      162 (51.6%)
 
 Gross Profit:       +$1,896.96
-Gross Loss:         -$722.63
+Gross Loss:         -$667.44
 Profit Factor:      2.63
 
 Sharpe Ratio:       1.84
@@ -292,7 +292,7 @@ python src/generate_report.py --results results/trade_log.csv
 
 - Past performance does not guarantee future results
 - Cryptocurrency trading involves substantial risk of loss
-- The 20× leverage mentioned in some configurations amplifies both gains and losses
+- Position sizing capped at 2.5% risk per trade with 6% daily loss limit circuit breaker
 - Always test thoroughly in paper trading before live deployment
 - Never trade with capital you cannot afford to lose
 
@@ -300,9 +300,9 @@ python src/generate_report.py --results results/trade_log.csv
 
 ## About
 
-**Strategy Developer:** Quantitative Researcher  
-**Version:** 1.0.0  
-**Last Updated:** April 2024  
+**Strategy Developer:** Jaswanth Obbu
+**Version:** 1.0.0
+**Last Updated:** July 2026
 **License:** MIT
 
 ### Contact
