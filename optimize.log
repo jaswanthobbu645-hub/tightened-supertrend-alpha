@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "/home/ubuntu/tightened-supertrend-alpha/optimize_parameters.py", line 2, in <module>
+    import pandas as pd
+ModuleNotFoundError: No module named 'pandas'

@@ -1,0 +1,175 @@
+import pandas as pd
+import numpy as np
+import os
+from src.strategy import TightenedSuperTrend
+from src.market_regime import detect_market_regime
+
+def generate_dataset():
+    data_dir = 'data'
+    symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT']
+    all_data = []
+    
+    strategy = TightenedSuperTrend(symbols=symbols)
+    
+    discard_stats = {}
+    
+    def record_discard(symbol, reason):
+        if reason not in discard_stats:
+            discard_stats[reason] = 0
+        discard_stats[reason] += 1
+
+    overall_total_candles = 0
+    overall_flips = 0
+    overall_bull = 0
+    overall_bear = 0
+    
+    for symbol in symbols:
+        file_path = os.path.join(data_dir, f'{symbol}.csv')
+        if not os.path.exists(file_path):
+            continue
+            
+        df = pd.read_csv(file_path, index_col='timestamp', parse_dates=True)
+        overall_total_candles += len(df)
+        
+        df = strategy.calculate_indicators(df)
+        
+        # Identify signals
+        df['is_signal'] = df['bull_flip'] | df['bear_flip']
+        signals = df[df['is_signal']].copy()
+        
+        symbol_flips = len(signals)
+        overall_flips += symbol_flips
+        overall_bull += signals['bull_flip'].sum()
+        overall_bear += signals['bear_flip'].sum()
+
+        valid_signals = []
+        # Discard checks
+        for idx in signals.index:
+            row = signals.loc[idx]
+            
+            if pd.isna(row.get('garch_vol')) or pd.isna(row.get('atr_pct')):
+                record_discard(symbol, 'NaN indicators')
+                continue
+            
+            if row.get('garch_vol', 0) == 0:
+                record_discard(symbol, 'Zero stop distance')
+                continue
+
+            entry_price = row['close']
+            is_bull = row['bull_flip']
+            
+            risk_dist = row['garch_vol'] * entry_price * strategy.garch_sl_mult
+            if risk_dist <= 0:
+                record_discard(symbol, 'Invalid ATR/SL')
+                continue
+            
+            # Look ahead
+            window = df.loc[idx:].iloc[1:21]
+            if len(window) < 20:
+                record_discard(symbol, 'No lookahead available')
+                continue
+            
+            target_price = entry_price + (2 * risk_dist) if is_bull else entry_price - (2 * risk_dist)
+            sl_price = entry_price - risk_dist if is_bull else entry_price + risk_dist
+            
+            target_reached = False
+            sl_reached = False
+            
+            for next_idx, next_row in window.iterrows():
+                if is_bull:
+                    if next_row['high'] >= target_price:
+                        target_reached = True
+                        break
+                    if next_row['low'] <= sl_price:
+                        sl_reached = True
+                        break
+                else:
+                    if next_row['low'] <= target_price:
+                        target_reached = True
+                        break
+                    if next_row['high'] >= sl_price:
+                        sl_reached = True
+                        break
+            
+            if not target_reached and not sl_reached:
+                 record_discard(symbol, 'Target/SL not reached in window')
+                 continue
+
+            row = row.copy()
+            row['target'] = 1 if target_reached else 0
+            valid_signals.append(row)
+            
+        symbol_signals = pd.DataFrame(valid_signals)
+        if not symbol_signals.empty:
+            symbol_signals["symbol"] = symbol
+        all_data.append(symbol_signals)
+        
+        print(f"Symbol {symbol}: Total Candles: {len(df)}, Flips: {symbol_flips}")
+        
+    final_df = pd.concat(all_data)
+    
+    # Feature engineering
+    final_df['ema200_trend'] = (final_df['close'] > final_df['ema200']).astype(int)
+    final_df['ema50_trend'] = (final_df['close'] > final_df['ema50']).astype(int)
+    final_df['volume_ratio'] = final_df['volume'] / final_df['volume'].rolling(20).mean()
+    
+    feature_cols = [
+        'ema200_trend', 'ema50_trend', 'adx', 'hurst', 'garch_vol', 'atr_pct',
+        'volume_ratio', 'st_fast_dir', 'st_slow_dir', 'rsi', 'ema20_slope', 'ema50_slope', 'ema200_slope', 'macd_hist', 'momentum20', 'momentum50', 'market_regime'
+    ]
+    
+    final_df = final_df.dropna(subset=feature_cols + ['target'])
+    
+    # Statistics
+    pos = final_df['target'].sum()
+    neg = len(final_df) - pos
+    pos_pct = pos / len(final_df) * 100
+    neg_pct = neg / len(final_df) * 100
+    
+    print(f"\n--- Global Stats ---")
+    print(f"Total Candles: {overall_total_candles}")
+    print(f"Total Flips: {overall_flips}")
+    print(f"Bull Flips: {overall_bull}")
+    print(f"Bear Flips: {overall_bear}")
+    print(f"Pos labels: {pos}")
+    print(f"Neg labels: {neg}")
+    print(f"Pos %: {pos_pct:.2f}%")
+    print(f"Neg %: {neg_pct:.2f}%")
+    
+    if pos_pct < 20 or pos_pct > 80:
+        print("WARNING: Class balance is skewed.")
+        
+    print("\n--- Discard Reasons ---")
+    for reason, count in discard_stats.items():
+        print(f"{reason}: {count}")
+        
+    # Print statistics
+    # Check signal generation verification
+    signals_before = len(final_df) + len(discard_stats)
+    signals_after = len(final_df)
+    
+    print("\n--- Signal Verification ---")
+    print(f"Signals before labeling: {signals_before}")
+    print(f"Signals after labeling: {signals_after}")
+    
+    diff = signals_before - signals_after
+    if signals_before > 0:
+        ratio = diff / signals_before
+        if ratio > 0.05:
+            print(f"Explanation: {ratio*100:.1f}% signals discarded due to NaN, zero-vol, or incomplete windows.")
+
+    final_df[feature_cols + ['target']].to_csv('training_data.csv', index=False)
+    
+    # Rows, columns, memory usage
+    print(f"\n--- Export Details ---")
+    print(f"Rows: {len(final_df)}")
+    print(f"Columns: {len(final_df.columns)}")
+    print(f"Memory usage: {final_df.memory_usage(deep=True).sum() / 1024 / 1024:.2f} MB")
+    
+    print("\n--- Feature Sanity ---")
+    print(final_df[feature_cols].describe().loc[['mean', 'std', 'min', 'max']])
+    print("\nMissing Values:")
+    print(final_df[feature_cols].isnull().sum())
+
+if __name__ == '__main__':
+    generate_dataset()
