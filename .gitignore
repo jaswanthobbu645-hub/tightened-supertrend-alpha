@@ -4,3 +4,21 @@ __pycache__/
 .env
 venv/
 *.pyc
+
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environment
+venv/
+
+# Generated outputs
+logs/
+results/
+
+# Trained models
+models/*.pkl
+
+# Temporary files
+*.bak
+*.log
