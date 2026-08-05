@@ -3,7 +3,76 @@ import os
 import joblib
 import numpy as np
 import json
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
 from src.strategy import TightenedSuperTrend
+
+def generate_report(trades_df, results, base_equity=10000):
+    os.makedirs('results', exist_ok=True)
+    
+    # Calculations
+    total_trades = len(trades_df)
+    win_rate = (trades_df['win'].mean() * 100) if total_trades > 0 else 0
+    net_pnl = trades_df['pnl'].sum()
+    profits = trades_df[trades_df['pnl'] > 0]['pnl'].sum()
+    losses = abs(trades_df[trades_df['pnl'] < 0]['pnl'].sum())
+    profit_factor = profits / losses if losses != 0 else float('inf')
+    cum_pnl = trades_df['pnl'].cumsum()
+    equity_curve = base_equity + cum_pnl
+    drawdowns = (equity_curve - equity_curve.cummax()) / equity_curve.cummax()
+    max_drawdown = drawdowns.min()
+    
+    # HTML Components
+    fig_equity = px.line(x=trades_df.index, y=equity_curve, title='Equity Curve')
+    fig_drawdown = px.area(x=trades_df.index, y=drawdowns, title='Drawdown Curve')
+    fig_dist = px.histogram(trades_df['pnl'], title='Trade Distribution')
+    fig_win_loss = px.pie(values=[len(trades_df[trades_df['pnl'] > 0]), len(trades_df[trades_df['pnl'] <= 0])], names=['Wins', 'Losses'], title='Win/Loss Distribution')
+    
+    # Save plotly charts to html strings
+    equity_html = fig_equity.to_html(full_html=False, include_plotlyjs='cdn')
+    drawdown_html = fig_drawdown.to_html(full_html=False, include_plotlyjs='cdn')
+    dist_html = fig_dist.to_html(full_html=False, include_plotlyjs='cdn')
+    win_loss_html = fig_win_loss.to_html(full_html=False, include_plotlyjs='cdn')
+
+    # Metrics Table
+    metrics = {
+        'Total Trades': total_trades,
+        'Win Rate': f'{win_rate:.2f}%',
+        'Net Profit': f'${net_pnl:.2f}',
+        'Profit Factor': f'{profit_factor:.2f}',
+        'Max Drawdown': f'{max_drawdown*100:.2f}%'
+    }
+    
+    metrics_table = pd.DataFrame(list(metrics.items()), columns=['Metric', 'Value']).to_html(index=False, classes='table table-striped')
+
+    monte_carlo_html = ""
+    if os.path.exists('results/monte_carlo_summary.json'):
+        with open('results/monte_carlo_summary.json', 'r') as f:
+            mc = json.load(f)
+            monte_carlo_html = f"<h3>Monte Carlo Summary</h3><pre>{json.dumps(mc, indent=2)}</pre>"
+
+    html_content = f"""
+    <html>
+    <head><title>Backtest Report</title>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css">
+    </head>
+    <body class='container'>
+        <h1>Backtest Report</h1>
+        <h2>Performance Metrics</h2>
+        {metrics_table}
+        {equity_html}
+        {drawdown_html}
+        {dist_html}
+        {win_loss_html}
+        {monte_carlo_html}
+    </body>
+    </html>
+    """
+    
+    with open('results/backtest_report.html', 'w') as f:
+        f.write(html_content)
+    print("Report generated: results/backtest_report.html")
 
 def run():
     model = joblib.load('best_model.pkl')
@@ -57,7 +126,6 @@ def run():
             
         df_signals['prob_win'] = model.predict_proba(feat_df)[:, 1]
         
-        # Sizing rules
         def get_size(p):
             if p >= 0.80: return 1.0
             if p >= 0.65: return 0.5
@@ -77,62 +145,11 @@ def run():
     trades_df = pd.DataFrame([vars(t) for t in results.get('trades', [])])
     
     if not trades_df.empty:
-        # Metrics Calculation
-        total_trades = len(trades_df)
-        win_rate = (trades_df['win'].mean() * 100)
-        net_pnl = trades_df['pnl'].sum()
-        
-        profits = trades_df[trades_df['pnl'] > 0]['pnl'].sum()
-        losses = abs(trades_df[trades_df['pnl'] < 0]['pnl'].sum())
-        profit_factor = profits / losses if losses != 0 else float('inf')
-        
-        # Sharpe Ratio (assuming daily, this is rough)
-        sharpe = (trades_df['pnl'].mean() / trades_df['pnl'].std()) * np.sqrt(252) if trades_df['pnl'].std() != 0 else 0
-        
-        # Max Drawdown
-        cum_pnl = trades_df['pnl'].cumsum()
-        running_max = cum_pnl.cummax()
-        # Ensure base is consistent for drawdown calculation
-        base_equity = 10000 
-        drawdowns = (cum_pnl - running_max) / (base_equity + running_max)
-        max_drawdown = drawdowns.min()
-        
-        # New Metrics
-        # Sortino Ratio (Downside deviation)
-        negative_returns = trades_df[trades_df['pnl'] < 0]['pnl']
-        downside_std = negative_returns.std() if len(negative_returns) > 0 else 0
-        sortino = (trades_df['pnl'].mean() / downside_std) * np.sqrt(252) if downside_std != 0 else 0
-        
-        # Calmar Ratio
-        # Annualized return (using PnL sum, rough proxy for now)
-        annualized_return = net_pnl * (252 / total_trades) if total_trades > 0 else 0
-        calmar = (annualized_return / abs(max_drawdown * base_equity)) if max_drawdown != 0 else 0
-        
-        # Expectancy
-        win_rate_decimal = win_rate / 100
-        avg_win = trades_df[trades_df['pnl'] > 0]['pnl'].mean() if profits > 0 else 0
-        avg_loss = abs(trades_df[trades_df['pnl'] < 0]['pnl'].mean()) if losses > 0 else 0
-        expectancy = (win_rate_decimal * avg_win) - ((1 - win_rate_decimal) * avg_loss)
-        
-        # Recovery Factor
-        recovery_factor = net_pnl / abs(max_drawdown * base_equity) if max_drawdown != 0 else 0
-        
+        generate_report(trades_df, results)
         print("==============================")
         print("FINAL PERFORMANCE REPORT")
         print("==============================")
         print("")
-        print(f"Total Trades: {total_trades}")
-        print(f"Win Rate: {win_rate:.2f}%")
-        print(f"Net Profit: ${net_pnl:.2f}")
-        print(f"Profit Factor: {profit_factor:.2f}")
-        print(f"Sharpe Ratio: {sharpe:.2f}")
-        print(f"Sortino Ratio: {sortino:.2f}")
-        print(f"Calmar Ratio: {calmar:.2f}")
-        print(f"Recovery Factor: {recovery_factor:.2f}")
-        print(f"Expectancy: {expectancy:.2f}")
-        print(f"Maximum Drawdown: {max_drawdown*100:.2f}%")
-        print("")
-        print("==============================")
     else:
         print("--- Final Report ---")
         print("Trades: 0")
