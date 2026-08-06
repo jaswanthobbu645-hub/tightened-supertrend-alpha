@@ -18,6 +18,11 @@ def generate_report(trades_df, results, base_equity=10000):
     profits = trades_df[trades_df['pnl'] > 0]['pnl'].sum()
     losses = abs(trades_df[trades_df['pnl'] < 0]['pnl'].sum())
     profit_factor = profits / losses if losses != 0 else float('inf')
+    
+    # Sharpe Ratio (assuming daily returns)
+    returns = trades_df['pnl'] / base_equity
+    sharpe_ratio = (returns.mean() / returns.std()) * np.sqrt(252) if returns.std() != 0 else 0
+    
     cum_pnl = trades_df['pnl'].cumsum()
     equity_curve = base_equity + cum_pnl
     drawdowns = (equity_curve - equity_curve.cummax()) / equity_curve.cummax()
@@ -41,6 +46,7 @@ def generate_report(trades_df, results, base_equity=10000):
         'Win Rate': f'{win_rate:.2f}%',
         'Net Profit': f'${net_pnl:.2f}',
         'Profit Factor': f'{profit_factor:.2f}',
+        'Sharpe Ratio': f'{sharpe_ratio:.2f}',
         'Max Drawdown': f'{max_drawdown*100:.2f}%'
     }
     
@@ -127,17 +133,13 @@ def run():
         df_signals['prob_win'] = model.predict_proba(feat_df)[:, 1]
         
         def get_size(p):
-            if p >= 0.80: return 1.0
-            if p >= 0.65: return 0.5
-            return 0.0
+            if p >= 0.60: return 1.00
+            elif p >= 0.50: return 0.75
+            elif p >= 0.40: return 0.50
+            else: return 0.25
 
-        df_signals['size_factor'] = df_signals['prob_win'].apply(get_size)
-        
-        mask = (df_signals['size_factor'] > 0)
-        df_signals['long_signal'] = (df_signals['long_signal'] == True) & mask
-        df_signals['short_signal'] = False
-        df_signals['long_size_factor'] = df_signals['size_factor']
-        df_signals['short_size_factor'] = 0.0
+        df_signals['long_size_factor'] = df_signals['prob_win'].apply(get_size)
+        df_signals['short_size_factor'] = df_signals['prob_win'].apply(get_size)
         
         processed_data[symbol] = df_signals
 
@@ -149,7 +151,19 @@ def run():
         print("==============================")
         print("FINAL PERFORMANCE REPORT")
         print("==============================")
-        print("")
+        print(f"Total Trades: {len(trades_df)}")
+        print(f"Win Rate: {(trades_df['win'].mean() * 100):.2f}%")
+        print(f"Net Profit: ${trades_df['pnl'].sum():.2f}")
+        
+        profits = trades_df[trades_df['pnl'] > 0]['pnl'].sum()
+        losses = abs(trades_df[trades_df['pnl'] < 0]['pnl'].sum())
+        profit_factor = profits / losses if losses != 0 else float('inf')
+        print(f"Profit Factor: {profit_factor:.2f}")
+        
+        returns = trades_df['pnl'] / 10000
+        sharpe_ratio = (returns.mean() / returns.std()) * np.sqrt(252) if returns.std() != 0 else 0
+        print(f"Sharpe Ratio: {sharpe_ratio:.2f}")
+        print("==============================")
     else:
         print("--- Final Report ---")
         print("Trades: 0")
