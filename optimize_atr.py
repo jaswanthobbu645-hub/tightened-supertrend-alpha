@@ -1,9 +1,11 @@
 import pandas as pd
 import os
 import itertools
+import time
 from src.strategy import TightenedSuperTrend
 
 def optimize():
+    start_time = time.time()
     symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT']
     data_dir = 'data'
     data = {}
@@ -28,20 +30,20 @@ def optimize():
 
     print(f"Running optimization for {len(combinations)} combinations...")
 
+    # Pre-process signals once
+    base_strategy = TightenedSuperTrend(symbols=symbols)
+    processed_data = {}
+    for symbol, df in data.items():
+        processed_data[symbol] = base_strategy.generate_signals(df)
+
     for sl, tp in combinations:
         # Instantiate Strategy with new multipliers
         strategy = TightenedSuperTrend(
             symbols=symbols, 
             adx_threshold=30.0,
-            atr_sl_mult=sl,
-            atr_tp_mult=tp
+            garch_sl_mult=sl,
+            garch_tp_mult=tp
         )
-
-        # Prepare data and run backtest
-        processed_data = {}
-        for symbol, df in data.items():
-            df_signals = strategy.generate_signals(df, hurst_threshold=0.50)
-            processed_data[symbol] = df_signals
 
         # Run Backtest
         backtest_results = strategy.run_backtest(processed_data)
@@ -91,6 +93,7 @@ def optimize():
     
     print("\nOptimization Results:")
     print(results_df.to_string(index=False))
+    print(f"\nTotal runtime: {time.time() - start_time:.2f} seconds")
 
 if __name__ == '__main__':
     optimize()
